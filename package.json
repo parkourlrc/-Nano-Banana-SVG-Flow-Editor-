@@ -1,0 +1,13 @@
+﻿{
+  "name": "research-diagram-studio",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev": "node server/index.js",
+    "start": "node server/index.js",
+    "check:secrets": "node scripts/check-secrets.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

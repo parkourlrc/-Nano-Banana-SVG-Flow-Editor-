@@ -1,0 +1,422 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Research Diagram Studio</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark"></div>
+          <div>
+            <div class="brand-title" data-i18n="brandTitle">Research Diagram Studio</div>
+            <div class="brand-subtitle" data-i18n="brandSubtitle">AI-generated editable/exportable research diagrams</div>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <button class="ghost" id="sync-btn" type="button" data-i18n="syncFromCanvas">Sync From Canvas</button>
+          <button class="primary" id="export-xml-btn" type="button" data-i18n="exportXml">Export XML</button>
+          <button class="primary" id="export-json-btn" type="button" data-i18n="exportJson">Export JSON</button>
+          <button class="ghost" id="settings-btn" type="button" data-i18n="settings">Settings</button>
+        </div>
+      </header>
+
+      <main class="main">
+        <section class="panel">
+          <div class="card" id="ai-panel">
+            <div class="card-header" data-i18n="aiGenerate">AI Generate</div>
+            <label class="field">
+              <span data-i18n="promptLabel">Prompt</span>
+              <textarea id="prompt-input" placeholder="Describe the research diagram you want..." data-i18n-placeholder="promptPlaceholder"></textarea>
+            </label>
+            <div class="field">
+              <span data-i18n="imagesOptional">Images (optional)</span>
+              <div class="upload-surface" id="image-upload-surface">
+                <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp" multiple />
+                <div class="upload-body">
+                  <div class="upload-icon">+</div>
+                  <div class="upload-copy">
+                    <div class="upload-text" data-i18n="imageUploadHint">Click to upload images (up to 4)</div>
+                    <div class="upload-subtext" data-i18n="imageUploadNote">Supported: PNG, JPG, WEBP</div>
+                  </div>
+                </div>
+              </div>
+              <div class="thumbs-meta" id="image-preview-note" data-i18n="imageNoneSelected">No images selected</div>
+              <div class="thumbs" id="image-preview" aria-live="polite"></div>
+            </div>
+            <div class="field-title" data-i18n="provider">Provider</div>
+            <div class="provider-status-row" id="provider-status-row">
+              <div class="provider-status">
+                <span class="dot" id="provider-status-dot"></span>
+                <span class="label" id="provider-status-text" data-i18n="providerNotConfigured">Not configured</span>
+              </div>
+              <button class="ghost" id="provider-settings-shortcut" type="button" data-i18n="openSettings">Open Settings</button>
+            </div>
+            <div class="field">
+              <span data-i18n="outputFormat">Output Format</span>
+              <div class="segmented">
+                <label><input type="radio" name="format" value="json" />JSON</label>
+                <label><input type="radio" name="format" value="xml" checked />XML</label>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="primary" id="generate-btn" type="button" data-i18n="generateDiagram">Generate Diagram</button>
+              <button class="ghost" id="clear-prompt-btn" type="button" data-i18n="clear">Clear</button>
+              <button class="ghost" id="calibrate-btn" type="button" data-i18n="precisionCalibrate" disabled>Precision Calibrate</button>
+              <button class="ghost" id="vision-debug-btn" type="button" data-i18n="visionDebug" disabled>Vision Debug</button>
+            </div>
+            <div class="status" id="ai-status" data-i18n="idle">Idle</div>
+            <div class="overlay-failures" id="overlay-failures" data-hidden="true">
+              <div class="overlay-failures-header">
+                <div class="overlay-failures-title" data-i18n="overlayFailuresTitle">Overlay failures</div>
+                <button class="ghost" id="retry-overlays-btn" type="button" data-i18n="retryFailedOverlays">Retry</button>
+              </div>
+              <div class="overlay-failures-list" id="overlay-failures-list"></div>
+            </div>
+          </div>
+
+          <div class="card" id="import-panel">
+            <div class="card-header" data-i18n="import">Import</div>
+            <label class="field">
+              <span data-i18n="pasteJsonXml">Paste JSON or XML</span>
+              <textarea id="import-text" placeholder="Paste JSON or XML here..." data-i18n-placeholder="pastePlaceholder"></textarea>
+            </label>
+            <label class="field">
+              <span data-i18n="uploadJsonXml">Upload JSON/XML file</span>
+              <div class="upload-surface" id="file-upload-surface">
+                <input id="import-file" type="file" accept=".json,.xml" />
+                <div class="upload-body">
+                  <div class="upload-icon">+</div>
+                  <div class="upload-copy">
+                    <div class="upload-text" data-i18n="fileUploadHint">Click to upload JSON or XML</div>
+                    <div class="upload-subtext" data-i18n="fileUploadNote">Supported: .json, .xml</div>
+                  </div>
+                </div>
+              </div>
+            </label>
+            <div class="actions">
+              <button class="primary" id="import-json-btn" type="button" data-i18n="importJson">Import JSON</button>
+              <button class="primary" id="import-xml-btn" type="button" data-i18n="importXml">Import XML</button>
+            </div>
+            <div class="status" id="import-status" data-i18n="idle">Idle</div>
+          </div>
+        </section>
+
+        <section class="canvas">
+          <div class="canvas-frame">
+            <iframe
+              id="diagram-frame"
+              title="diagram"
+              src="https://embed.diagrams.net/?embed=1&ui=atlas&spin=1&proto=json&configure=1&splash=0&plugins=0&stealth=1&gapi=0&db=0&od=0&tr=0&gh=0&gl=0&save=local&saveAndExit=0&noSaveBtn=1&noExitBtn=1"
+              tabindex="-1"
+              allow="clipboard-read; clipboard-write"
+            ></iframe>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal" id="settings-modal" aria-hidden="true">
+      <div class="modal-backdrop" data-modal-close></div>
+      <div class="modal-content" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div class="modal-title" data-i18n="settings">Settings</div>
+          <button class="ghost" id="close-settings-btn" type="button" data-modal-close data-i18n="close">Close</button>
+        </div>
+
+        <div class="modal-section">
+          <div class="card-subheader" data-i18n="language">Language</div>
+          <label class="field">
+            <span data-i18n="languageSelect">Select language</span>
+            <select id="language-select">
+              <option value="en">English</option>
+              <option value="zh">中文</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="modal-section">
+          <div class="card-subheader" data-i18n="quality">Quality</div>
+          <label class="field">
+            <span data-i18n="qualityMode">Quality Mode</span>
+            <select id="quality-mode">
+              <option value="balanced" data-i18n="qualityBalanced">Balanced</option>
+              <option value="max" data-i18n="qualityMax">Max</option>
+            </select>
+          </label>
+          <div class="note" data-i18n="qualityModeHint">Max uses heavier vision/OCR passes for higher fidelity.</div>
+          <label class="field toggle-field">
+            <span data-i18n="enableCritic">Enable Critic Review</span>
+            <input id="critic-toggle" type="checkbox" />
+          </label>
+          <div class="note" data-i18n="criticHint">Runs an extra pass comparing the reference image and rendered diagram.</div>
+          <label class="field toggle-field" style="margin-top: 14px">
+            <span data-i18n="overlayTrim">Trim Overlay Whitespace</span>
+            <input id="overlay-trim-toggle" type="checkbox" />
+          </label>
+          <div class="note" data-i18n="overlayTrimHint">Tightens extracted overlay bounds to remove blank margins (recommended).</div>
+        </div>
+
+        <div class="modal-section">
+          <div class="section-header-row">
+            <div class="card-header" data-i18n="providerSettings">Provider Settings</div>
+            <button class="ghost small" id="get-api-btn" type="button" data-i18n="getApi">Get API</button>
+          </div>
+          <label class="field">
+            <span data-i18n="activeProvider">Active Provider</span>
+            <select id="provider-select"></select>
+          </label>
+          <div class="note provider-note" data-i18n="providerConfigHint">Pick a provider, then fill in the required fields.</div>
+          <label class="field toggle-field" style="margin-top: 14px">
+            <span data-i18n="enableImageModel">Enable Image Model</span>
+            <input id="image-model-enabled" type="checkbox" />
+          </label>
+          <div class="note" data-i18n="enableImageModelHint">
+            When enabled, the app may call the image model to generate/modify a reference image. Disable to prevent any image generation calls.
+          </div>
+          <div class="provider-fields" id="provider-fields" data-hidden="true">
+            <label class="field">
+              <span data-i18n="providerApiKey">API Key</span>
+              <div class="input-row">
+                <input id="provider-key" type="password" placeholder="API key" data-i18n-placeholder="providerApiKeyPlaceholder" />
+                <button class="icon-button" id="toggle-key-visibility" type="button" data-i18n-title="toggleKeyVisibility">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M12 5c5.2 0 9.4 3.2 11 7-1.6 3.8-5.8 7-11 7S2.6 15.8 1 12c1.6-3.8 5.8-7 11-7zm0 2.2C8 7.2 4.7 9.6 3.4 12 4.7 14.4 8 16.8 12 16.8s7.3-2.4 8.6-4.8C19.3 9.6 16 7.2 12 7.2zm0 2.3a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </label>
+            <label class="field" id="provider-base-row">
+              <span data-i18n="providerBaseUrl">Base URL</span>
+              <input id="provider-base" type="text" placeholder="https://api.openai.com/v1" data-i18n-placeholder="providerBaseUrlPlaceholder" />
+            </label>
+            <label class="field">
+              <span data-i18n="providerLlmModel">LLM Model</span>
+              <input id="provider-model" type="text" placeholder="gpt-4o-mini" data-i18n-placeholder="providerLlmModelPlaceholder" />
+            </label>
+            <label class="field">
+              <span data-i18n="providerImageModel">Image Model</span>
+              <input id="provider-image-model" type="text" placeholder="gpt-image-1" data-i18n-placeholder="providerImageModelPlaceholder" />
+            </label>
+          </div>
+          <div class="actions">
+            <button class="primary" id="save-provider-btn" type="button" data-i18n="saveProvider">Save Provider</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="calibration-modal" aria-hidden="true">
+      <div class="modal-backdrop" data-modal-close></div>
+      <div class="modal-content calibration-content" role="dialog" aria-modal="true">
+        <div class="modal-header calibration-header">
+          <div class="modal-title" data-i18n="precisionCalibrate">Precision Calibrate</div>
+          <div class="calibration-header-actions">
+            <button class="ghost" id="calib-toggle-history" type="button" data-i18n="toggleHistory">Toggle History</button>
+            <button class="ghost" id="calib-view-image" type="button" data-i18n="viewRefImage">View Ref Image</button>
+            <button class="ghost" id="calib-download-image" type="button" data-i18n="downloadRefImage">Download Ref Image</button>
+            <button class="primary" id="calib-apply-btn" type="button" data-i18n="applyToCanvas">Apply to Canvas</button>
+            <button class="ghost" id="calib-close-btn" type="button" data-modal-close data-i18n="close">Close</button>
+          </div>
+        </div>
+
+        <div class="calibration-layout">
+          <aside class="calibration-history" id="calib-history">
+            <div class="calibration-history-header">
+              <div class="calibration-history-title" data-i18n="history">History</div>
+            </div>
+            <div class="calibration-history-list" id="calib-history-list" aria-live="polite"></div>
+          </aside>
+
+          <section class="calibration-stage">
+            <div class="calibration-toolbar">
+              <div class="tool-group">
+                <button class="tool-button" id="calib-tool-select" type="button" data-tool="select" data-i18n="toolSelect">Select</button>
+                <button class="tool-button" id="calib-tool-node" type="button" data-tool="newNode" data-i18n="toolNewNode">New Node</button>
+                <button class="tool-button" id="calib-tool-new" type="button" data-tool="newOverlay" data-i18n="toolNewOverlay">New Overlay</button>
+              </div>
+              <div class="tool-group">
+                <button class="tool-button" id="calib-tool-fg" type="button" data-tool="fg" data-i18n="toolFg">FG</button>
+                <button class="tool-button" id="calib-tool-bg" type="button" data-tool="bg" data-i18n="toolBg">BG</button>
+              </div>
+              <div class="tool-group">
+                <button class="ghost small" id="calib-zoom-reset" type="button" data-i18n="resetView">Reset View</button>
+                <button class="ghost small" id="calib-undo" type="button" data-i18n="undo">Undo</button>
+                <button class="ghost small" id="calib-redo" type="button" data-i18n="redo">Redo</button>
+              </div>
+              <div class="calibration-legend" id="calib-legend">
+                <div class="legend-item">
+                  <span class="legend-swatch node" aria-hidden="true"></span>
+                  <span data-i18n="legendNode">Node</span>
+                </div>
+                <div class="legend-item">
+                  <span class="legend-swatch overlay" aria-hidden="true"></span>
+                  <span data-i18n="legendOverlay">Overlay</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="calibration-viewport" id="calib-viewport">
+              <div class="calibration-canvas" id="calib-canvas">
+                <img id="calib-image" alt="reference" draggable="false" />
+                <div class="calibration-box-layer" id="calib-box-layer"></div>
+                <div class="calibration-point-layer" id="calib-point-layer"></div>
+                <div class="calibration-draft" id="calib-draft" data-hidden="true"></div>
+              </div>
+            </div>
+            <div class="status calibration-status" id="calib-status"></div>
+          </section>
+
+          <aside class="calibration-inspector">
+            <div class="calibration-section">
+              <div class="card-subheader" data-i18n="selection">Selection</div>
+              <div class="note" id="calib-selection-summary" data-i18n="calibSelectHint">Select a node or overlay to edit.</div>
+            </div>
+
+            <div class="calibration-section" id="calib-node-panel" data-hidden="true">
+              <div class="card-subheader" data-i18n="node">Node</div>
+              <label class="field">
+                <span data-i18n="nodeId">ID</span>
+                <input id="calib-node-id" type="text" disabled />
+              </label>
+              <label class="field">
+                <span data-i18n="nodeShape">Shape</span>
+                <select id="calib-node-shape"></select>
+              </label>
+              <label class="field">
+                <span data-i18n="nodeText">Text</span>
+                <textarea id="calib-node-text" placeholder=""></textarea>
+              </label>
+              <div class="bbox-grid">
+                <label class="field">
+                  <span>X</span>
+                  <input id="calib-node-x" type="number" step="1" />
+                </label>
+                <label class="field">
+                  <span>Y</span>
+                  <input id="calib-node-y" type="number" step="1" />
+                </label>
+                <label class="field">
+                  <span>W</span>
+                  <input id="calib-node-w" type="number" step="1" />
+                </label>
+                <label class="field">
+                  <span>H</span>
+                  <input id="calib-node-h" type="number" step="1" />
+                </label>
+              </div>
+              <div class="actions">
+                <button class="ghost" id="calib-node-delete" type="button" data-i18n="deleteNode">Delete</button>
+              </div>
+            </div>
+
+            <div class="calibration-section" id="calib-overlay-panel" data-hidden="true">
+              <div class="card-subheader" data-i18n="overlay">Overlay</div>
+              <label class="field">
+                <span data-i18n="overlayId">ID</span>
+                <input id="calib-ov-id" type="text" disabled />
+              </label>
+              <label class="field">
+                <span data-i18n="overlayKind">Kind</span>
+                <select id="calib-ov-kind">
+                  <option value="icon" data-i18n="overlayKindIcon">icon</option>
+                  <option value="photo" data-i18n="overlayKindPhoto">photo</option>
+                  <option value="chart" data-i18n="overlayKindChart">chart</option>
+                  <option value="plot" data-i18n="overlayKindPlot">plot</option>
+                  <option value="3d" data-i18n="overlayKind3d">3d</option>
+                  <option value="noise" data-i18n="overlayKindNoise">noise</option>
+                  <option value="screenshot" data-i18n="overlayKindScreenshot">screenshot</option>
+                </select>
+              </label>
+              <label class="field">
+                <span data-i18n="overlayOwner">Owner</span>
+                <select id="calib-ov-owner"></select>
+              </label>
+              <div class="field">
+                <span data-i18n="overlayGranularity">Granularity</span>
+                <div class="segmented">
+                  <label><input type="radio" name="calib-granularity" value="alphaMask" /><span data-i18n="granularityAlphaMask">alphaMask</span></label>
+                  <label><input type="radio" name="calib-granularity" value="opaqueRect" /><span data-i18n="granularityOpaqueRect">opaqueRect</span></label>
+                </div>
+              </div>
+              <div class="bbox-grid">
+                <label class="field">
+                  <span>X</span>
+                  <input id="calib-ov-x" type="number" step="1" />
+                </label>
+                <label class="field">
+                  <span>Y</span>
+                  <input id="calib-ov-y" type="number" step="1" />
+                </label>
+                <label class="field">
+                  <span>W</span>
+                  <input id="calib-ov-w" type="number" step="1" />
+                </label>
+                <label class="field">
+                  <span>H</span>
+                  <input id="calib-ov-h" type="number" step="1" />
+                </label>
+              </div>
+              <div class="overlay-points-row">
+                <div class="note" id="calib-ov-points-meta"></div>
+                <button class="ghost small" id="calib-ov-clear-points" type="button" data-i18n="clearPoints">Clear Points</button>
+              </div>
+	            <div class="actions">
+	                <button class="primary" id="calib-ov-segment" type="button" data-i18n="segmentOverlay">Segment</button>
+	                <button class="ghost" id="calib-ov-select-owner" type="button" data-i18n="selectOwnerNode">Select Node</button>
+	                <button class="ghost" id="calib-ov-delete" type="button" data-i18n="deleteOverlay">Delete</button>
+	              </div>
+              <div class="thumbs" style="margin-top: 12px">
+                <img id="calib-ov-preview" alt="overlay preview" style="max-width: 100%; border-radius: 12px; border: 1px solid var(--card-border)" />
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="vision-debug-modal" aria-hidden="true">
+      <div class="modal-backdrop" data-modal-close></div>
+      <div class="modal-content" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div class="modal-title" data-i18n="visionDebug">Vision Debug</div>
+          <button class="ghost" id="close-vision-debug-btn" type="button" data-modal-close data-i18n="close">Close</button>
+        </div>
+        <div class="modal-section">
+          <div class="note" id="vision-debug-meta"></div>
+          <div class="thumbs" style="margin-top: 12px">
+            <img id="vision-debug-image" alt="vision debug" style="max-width: 100%; border-radius: 12px; border: 1px solid var(--card-border)" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="image-viewer-modal" aria-hidden="true">
+      <div class="modal-backdrop" data-modal-close></div>
+      <div class="modal-content image-viewer-content" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div class="modal-title" id="image-viewer-title">Reference Image</div>
+          <div class="image-viewer-actions">
+            <button class="ghost small" id="image-viewer-zoom-out" type="button" data-i18n="zoomOut">Zoom Out</button>
+            <button class="ghost small" id="image-viewer-zoom-in" type="button" data-i18n="zoomIn">Zoom In</button>
+            <button class="ghost small" id="image-viewer-reset" type="button" data-i18n="resetView">Reset View</button>
+            <button class="ghost" id="image-viewer-download" type="button" data-i18n="download">Download</button>
+            <button class="ghost" id="image-viewer-close" type="button" data-modal-close data-i18n="close">Close</button>
+          </div>
+        </div>
+        <div class="image-viewer-viewport" id="image-viewer-viewport">
+          <img id="image-viewer-image" alt="image" draggable="false" />
+        </div>
+        <div class="note" data-i18n="imageViewerHint">Scroll to zoom, drag to pan. Double-click to reset.</div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

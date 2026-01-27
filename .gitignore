@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+
+# Provider configs (may contain API keys)
+server/config/providers*.json
+!server/config/providers.sample.json
+providers*.json
+.research-diagram-studio/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+.npmrc
+.pypirc
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+.ssh/
+
+# Logs / debug artifacts (may contain local paths and prompts)
+*.log
+tmp.*
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# App caches / generated
+server/.cache/
+server/shapes/catalog.json
+server/shapes/default-shapes.json
+
+# Local DB / cache artifacts
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Python / vision_service (local)
+vision_service/.venv/
+vision_service/venv/
+vision_service/__pycache__/
+vision_service/.pytest_cache/
+vision_service/.mypy_cache/
+vision_service/.ruff_cache/
+vision_service/.weights/
+vision_service/.cache/
