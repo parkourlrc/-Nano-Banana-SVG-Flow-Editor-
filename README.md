@@ -1,4 +1,4 @@
-# Research Diagram Studio（科研作图工作台）
+﻿# Research Diagram Studio（科研作图工作台）
 
 简体中文 | [English](README.en.md)
 
@@ -119,4 +119,5 @@ npm run check:secrets
 
 加我联系方式，拉您进用户群呐：
 Telegram:@ryonliu
+
 如需稳定便宜的API，查看：https://0-0.pro/
