@@ -17,9 +17,12 @@
 
 - **整体架构**：`server/`（Node/Express）同时提供静态前端（`web/`）与 API；diagrams.net 画布在浏览器内运行，项目通过 iframe/message 与画布交互。
 - **Provider 调用**：所有 LLM / 生图请求由后端统一代理（`/api/flow/:format`、`/api/image/generate`），避免在前端直接暴露密钥；`GET /api/providers` 返回的是“已脱敏”的 provider 信息（不含 `apiKey`）。
-- **两条生成路径**：
-  - **无参考图**：Prompt → `/api/flow/:format` → 模型返回 XML/JSON → 前端加载到画布。
+- **三条生成路径**：
+  - **无参考图（直出）**：Prompt → `/api/flow/:format` → 模型返回 XML/JSON → 前端加载到画布。
   - **有参考图（精确校对）**：参考图 → `/api/vision/structure` → 返回结构化 JSON（节点/文字/连线/overlay）→ 前端校对编辑 → **确定性** JSON→mxGraph XML → `Apply to Canvas` 落到画布。
+  - **生图→再识别（Image Model 辅助）**：当你启用 `Enable Image Model` 且当前输入被判断为“需要生图/改写参考图”时：
+    - **无上传图**：Prompt → `/api/image/generate`（使用 Image Model，例如 *nano banana pro*）→ 得到参考图（前端可预览/下载）→ `/api/vision/structure` → 校对 → 落到画布。
+    - **有上传图但想重绘/修改/风格参考**：上传图 + Prompt → `/api/image/generate` 生成新参考图 → `/api/vision/structure` → 校对 → 落到画布。
 - **本地视觉服务（Route-1）**：当 `vision_service` 可用时，结构抽取会优先使用本地 CV+OCR+SAM2 能力来提升 bbox/文字/overlay 的质量；不可用时会明确报错提示安装/启动（避免“静默退化”导致结果不可控）。
 - **任务持久化**：精确校对任务以 `imageHash + prompt` 为键写入浏览器 IndexedDB，可随时“打开已有任务继续改”；分割后的 overlay PNG 会缓存以减少重复计算。
 - **防泄露机制**：Provider 配置默认写到 `~/.research-diagram-studio/providers.json`（不进仓库）+ `.gitignore` 规则 + `npm run check:secrets` + GitHub Actions 扫描，降低误提交密钥/隐私的风险。

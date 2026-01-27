@@ -17,9 +17,12 @@ A diagrams.net (draw.io) embedded web app that turns prompts / paper-figure scre
 
 - **Architecture**: `server/` (Node/Express) serves both the static frontend (`web/`) and the API. The diagrams.net canvas runs in the browser, and the app communicates with it via iframe messaging.
 - **Provider requests**: all LLM / image-generation calls are proxied by the backend (`/api/flow/:format`, `/api/image/generate`) so API keys don’t need to be exposed to the frontend. `GET /api/providers` returns a sanitized provider list (no `apiKey`).
-- **Two generation paths**:
-  - **No reference image**: Prompt → `/api/flow/:format` → model returns XML/JSON → frontend loads it into the canvas.
+- **Three generation paths**:
+  - **No reference image (direct)**: Prompt → `/api/flow/:format` → model returns XML/JSON → frontend loads it into the canvas.
   - **With reference image (Precision Calibrate)**: image → `/api/vision/structure` → structured JSON (nodes/text/edges/overlays) → user calibration → **deterministic** JSON→mxGraph XML → `Apply to Canvas`.
+  - **Image model → then extract (Image Model assisted)**: when `Enable Image Model` is ON and your current input is judged to “need image generation / rewrite”:
+    - **No uploaded image**: Prompt → `/api/image/generate` (Image Model, e.g. *nano banana pro*) → reference image (preview/download in UI) → `/api/vision/structure` → calibrate → apply to canvas.
+    - **Uploaded image but you want redraw/edit/style-variant**: image + Prompt → `/api/image/generate` to create a new reference → `/api/vision/structure` → calibrate → apply to canvas.
 - **Local vision service (Route-1)**: when `vision_service` is available, the pipeline prefers local CV+OCR+SAM2 for better bbox/text/overlay quality. If it’s not available, the API returns a clear error message instead of silently degrading output quality.
 - **Task persistence**: calibration tasks are keyed by `imageHash + prompt` and stored in browser IndexedDB so you can reopen and continue editing. Segmented overlay PNGs are cached to avoid recomputation.
 - **Leak prevention**: provider config is stored outside the repo by default (`~/.research-diagram-studio/providers.json`) + `.gitignore` + `npm run check:secrets` + GitHub Actions scanning.
