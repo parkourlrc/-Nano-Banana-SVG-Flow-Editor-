@@ -13,6 +13,17 @@
 - **可选“生图模型”**：启用后，可先生成/改写参考图，再基于参考图做结构抽取与落图
 - **隐私优先**：Provider 密钥不写入仓库，默认保存到用户目录（见下文）
 
+## 实现原理（架构与数据流）
+
+- **整体架构**：`server/`（Node/Express）同时提供静态前端（`web/`）与 API；diagrams.net 画布在浏览器内运行，项目通过 iframe/message 与画布交互。
+- **Provider 调用**：所有 LLM / 生图请求由后端统一代理（`/api/flow/:format`、`/api/image/generate`），避免在前端直接暴露密钥；`GET /api/providers` 返回的是“已脱敏”的 provider 信息（不含 `apiKey`）。
+- **两条生成路径**：
+  - **无参考图**：Prompt → `/api/flow/:format` → 模型返回 XML/JSON → 前端加载到画布。
+  - **有参考图（精确校对）**：参考图 → `/api/vision/structure` → 返回结构化 JSON（节点/文字/连线/overlay）→ 前端校对编辑 → **确定性** JSON→mxGraph XML → `Apply to Canvas` 落到画布。
+- **本地视觉服务（Route-1）**：当 `vision_service` 可用时，结构抽取会优先使用本地 CV+OCR+SAM2 能力来提升 bbox/文字/overlay 的质量；不可用时会明确报错提示安装/启动（避免“静默退化”导致结果不可控）。
+- **任务持久化**：精确校对任务以 `imageHash + prompt` 为键写入浏览器 IndexedDB，可随时“打开已有任务继续改”；分割后的 overlay PNG 会缓存以减少重复计算。
+- **防泄露机制**：Provider 配置默认写到 `~/.research-diagram-studio/providers.json`（不进仓库）+ `.gitignore` 规则 + `npm run check:secrets` + GitHub Actions 扫描，降低误提交密钥/隐私的风险。
+
 ## 环境要求
 
 - Node.js：建议 **18+**（需要内置 `fetch`）
