@@ -23,7 +23,7 @@ A diagrams.net (draw.io) embedded web app that turns prompts / paper-figure scre
   - **Image model → then extract (Image Model assisted)**: when `Enable Image Model` is ON and your current input is judged to “need image generation / rewrite”:
     - **No uploaded image**: Prompt → `/api/image/generate` (Image Model, e.g. *nano banana pro*) → reference image (preview/download in UI) → `/api/vision/structure` → calibrate → apply to canvas.
     - **Uploaded image but you want redraw/edit/style-variant**: image + Prompt → `/api/image/generate` to create a new reference → `/api/vision/structure` → calibrate → apply to canvas.
-- **Local vision service (Route-1)**: when `vision_service` is available, the pipeline prefers local CV+OCR+SAM2 for better bbox/text/overlay quality. If it’s not available, the API returns a clear error message instead of silently degrading output quality.
+- **Local vision service (Route-1)**: when `vision_service` is available, the pipeline prefers local CV+OCR+SAM2 (and optional SAM3 proposals) for better bbox/text/overlay quality. If it’s not available, the API returns a clear error message instead of silently degrading output quality.
 - **Task persistence**: calibration tasks are keyed by `imageHash + prompt` and stored in browser IndexedDB so you can reopen and continue editing. Segmented overlay PNGs are cached to avoid recomputation.
 - **Leak prevention**: provider config is stored outside the repo by default (`~/.research-diagram-studio/providers.json`) + `.gitignore` + `npm run check:secrets` + GitHub Actions scanning.
 
@@ -31,7 +31,7 @@ A diagrams.net (draw.io) embedded web app that turns prompts / paper-figure scre
 
 - Node.js: **18+** (needs built-in `fetch`)
 - Browser: Chrome / Edge
-- (Optional) Local vision service: `vision_service/` (CV + OCR + SAM2, see `vision_service/README.md`)
+- (Optional) Local vision service: `vision_service/` (CV + OCR + SAM2; optional SAM3 proposals; see `vision_service/README.md`)
 
 ## Quick Start
 
@@ -61,7 +61,8 @@ Open `Settings` (top-right):
 3. Fill required fields:
    - `API Key`
    - `Base URL` (OpenAI-compatible default: `https://0-0.pro/v1`)
-   - `LLM Model` (structure/text extraction, planning, critic, etc.)
+   - `LLM Model` (main model for prompt → diagram generation, especially when there is no reference image)
+   - `VLM Planner Model` (vision tasks with images: OCR text extraction / structure extraction / overlay planning / critic review; default: `gemini-3-pro`)
    - `Image Model` (optional, for image generation / rewrite)
 4. Click `Save Provider`
 5. (Optional) click `Get API` to open: https://0-0.pro/
@@ -128,6 +129,7 @@ npm run check:secrets
 - `web/`: frontend (`index.html` / `app.js` / `styles.css`)
 - `server/`: backend (`server/index.js`)
 - `vision_service/`: optional local vision service (FastAPI + CV + SAM2)
+- `sam3/`: optional SAM3 package (for cleaner node/overlay proposals; weights download to `vision_service/.weights/`)
 
 ---
 

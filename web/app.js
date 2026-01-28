@@ -39,6 +39,7 @@ const providerBaseRow = document.getElementById('provider-base-row');
 const providerKey = document.getElementById('provider-key');
 const providerBase = document.getElementById('provider-base');
 const providerModel = document.getElementById('provider-model');
+const providerPlannerModel = document.getElementById('provider-planner-model');
 const providerImageModel = document.getElementById('provider-image-model');
 const imageModelEnabledToggle = document.getElementById('image-model-enabled');
 const toggleKeyVisibilityBtn = document.getElementById('toggle-key-visibility');
@@ -325,6 +326,8 @@ const i18n = {
     enableImageModelHint: 'When enabled, the app may auto-generate/modify a reference image using the Image Model. Turn off to block all image generation calls.',
     providerLlmModel: 'LLM Model',
     providerLlmModelPlaceholder: 'gpt-4o-mini',
+    providerPlannerModel: 'VLM Planner Model',
+    providerPlannerModelPlaceholder: 'gemini-3-pro',
     providerImageModel: 'Image Model',
     providerImageModelPlaceholder: 'gpt-image-1',
     providerModel: 'Model',
@@ -526,6 +529,8 @@ const i18n = {
     enableImageModelHint: '开启后会自动判断是否需要调用生图模型生成/修改参考图；关闭后任何情况下都不会调用生图模型。',
     providerLlmModel: 'LLM 模型',
     providerLlmModelPlaceholder: 'gpt-4o-mini',
+    providerPlannerModel: 'VLM 规划器模型',
+    providerPlannerModelPlaceholder: 'gemini-3-pro',
     providerImageModel: '生图模型',
     providerImageModelPlaceholder: 'gpt-image-1',
     providerModel: '模型',
@@ -679,15 +684,15 @@ const i18n = {
 };
 
 const providerCatalog = [
-  { type: 'openai-compatible', labelKey: 'providerLabelOpenaiCompatible', label: 'OpenAI-compatible', requiresBase: true, defaultModel: '', defaultBase: 'https://0-0.pro/v1' },
-  { type: 'openai', labelKey: 'providerLabelOpenai', label: 'OpenAI', requiresBase: false, defaultModel: 'gpt-4o-mini', defaultBase: 'https://api.openai.com/v1' },
-  { type: 'gemini', labelKey: 'providerLabelGemini', label: 'Gemini', requiresBase: false, defaultModel: 'gemini-2.5-flash', defaultBase: '' },
-  { type: 'anthropic', labelKey: 'providerLabelAnthropic', label: 'Anthropic', requiresBase: false, defaultModel: 'claude-3-5-sonnet-20241022', defaultBase: '' },
-  { type: 'openrouter', labelKey: 'providerLabelOpenRouter', label: 'OpenRouter', requiresBase: true, defaultModel: 'openai/gpt-4o-mini', defaultBase: 'https://openrouter.ai/api/v1' },
-  { type: 'groq', labelKey: 'providerLabelGroq', label: 'Groq', requiresBase: true, defaultModel: 'llama-3.1-70b-versatile', defaultBase: 'https://api.groq.com/openai/v1' },
-  { type: 'deepseek', labelKey: 'providerLabelDeepSeek', label: 'DeepSeek', requiresBase: true, defaultModel: 'deepseek-chat', defaultBase: 'https://api.deepseek.com/v1' },
-  { type: 'ollama', labelKey: 'providerLabelOllama', label: 'Ollama (Local)', requiresBase: true, defaultModel: 'llama3.1', defaultBase: 'http://localhost:11434/v1' },
-  { type: 'custom', labelKey: 'providerLabelCustom', label: 'Custom', requiresBase: true, defaultModel: '', defaultBase: '' }
+  { type: 'openai-compatible', labelKey: 'providerLabelOpenaiCompatible', label: 'OpenAI-compatible', requiresBase: true, defaultModel: '', defaultPlannerModel: 'gemini-3-pro', defaultBase: 'https://0-0.pro/v1' },
+  { type: 'openai', labelKey: 'providerLabelOpenai', label: 'OpenAI', requiresBase: false, defaultModel: 'gpt-4o-mini', defaultPlannerModel: 'gpt-4o-mini', defaultBase: 'https://api.openai.com/v1' },
+  { type: 'gemini', labelKey: 'providerLabelGemini', label: 'Gemini', requiresBase: false, defaultModel: 'gemini-2.5-flash', defaultPlannerModel: 'gemini-3-pro', defaultBase: '' },
+  { type: 'anthropic', labelKey: 'providerLabelAnthropic', label: 'Anthropic', requiresBase: false, defaultModel: 'claude-3-5-sonnet-20241022', defaultPlannerModel: 'claude-3-5-sonnet-20241022', defaultBase: '' },
+  { type: 'openrouter', labelKey: 'providerLabelOpenRouter', label: 'OpenRouter', requiresBase: true, defaultModel: 'openai/gpt-4o-mini', defaultPlannerModel: 'openai/gpt-4o-mini', defaultBase: 'https://openrouter.ai/api/v1' },
+  { type: 'groq', labelKey: 'providerLabelGroq', label: 'Groq', requiresBase: true, defaultModel: 'llama-3.1-70b-versatile', defaultPlannerModel: 'llama-3.1-70b-versatile', defaultBase: 'https://api.groq.com/openai/v1' },
+  { type: 'deepseek', labelKey: 'providerLabelDeepSeek', label: 'DeepSeek', requiresBase: true, defaultModel: 'deepseek-chat', defaultPlannerModel: 'deepseek-chat', defaultBase: 'https://api.deepseek.com/v1' },
+  { type: 'ollama', labelKey: 'providerLabelOllama', label: 'Ollama (Local)', requiresBase: true, defaultModel: 'llama3.1', defaultPlannerModel: 'llama3.1', defaultBase: 'http://localhost:11434/v1' },
+  { type: 'custom', labelKey: 'providerLabelCustom', label: 'Custom', requiresBase: true, defaultModel: '', defaultPlannerModel: '', defaultBase: '' }
 ];
 
 const providerCatalogByType = providerCatalog.reduce((acc, item) => {
@@ -4015,6 +4020,7 @@ async function saveProvider() {
   const payload = {
     type: selected.type,
     model: providerModel.value.trim(),
+    plannerModel: providerPlannerModel ? providerPlannerModel.value.trim() : '',
     imageModel: providerImageModel ? providerImageModel.value.trim() : '',
     apiKey: apiKeyTrimmed,
     baseUrl: providerBase.value.trim(),
@@ -6084,6 +6090,7 @@ function updateProviderFields() {
     providerKey.value = '';
     providerBase.value = '';
     providerModel.value = '';
+    if (providerPlannerModel) providerPlannerModel.value = '';
     if (providerImageModel) providerImageModel.value = '';
     return;
   }
@@ -6093,6 +6100,9 @@ function updateProviderFields() {
   providerKey.value = typeof cachedKey === 'string' ? cachedKey : '';
   providerBase.value = selected.baseUrl || selected.defaultBase || '';
   providerModel.value = selected.model || selected.defaultModel || '';
+  if (providerPlannerModel) {
+    providerPlannerModel.value = selected.plannerModel || selected.defaultPlannerModel || selected.model || selected.defaultModel || '';
+  }
   if (providerImageModel) providerImageModel.value = selected.imageModel || '';
 
   const needsBase = Boolean(selected.requiresBase);

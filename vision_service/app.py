@@ -2,6 +2,7 @@ import base64
 import hashlib
 import importlib.util
 import os
+import sys
 import tempfile
 import urllib.request
 from dataclasses import dataclass
@@ -13,12 +14,31 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+# Ensure repo root is importable even when running from `vision_service/`.
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
 
 app = FastAPI(title="Research Diagram Vision Service", version="1.0.0")
 
 WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), ".weights")
 SAM2_MODEL_NAME = os.environ.get("SAM2_MODEL", "sam2_hiera_base_plus")
 SAM2_FORCE_CPU = os.environ.get("SAM2_FORCE_CPU", "0") == "1"
+
+# Optional: SAM3 (text-prompt grounding) for higher-quality node/overlay proposals (Edit-Banana style).
+SAM3_ENABLED = os.environ.get("SAM3_ENABLED", "1") != "0"
+SAM3_FORCE_CPU = os.environ.get("SAM3_FORCE_CPU", "0") == "1"
+SAM3_MODEL_ID = os.environ.get("SAM3_MODEL_ID", "facebook/sam3")
+SAM3_CHECKPOINT_NAME = os.environ.get("SAM3_CHECKPOINT_NAME", "sam3.pt")
+try:
+    SAM3_SCORE_THRESHOLD = float(os.environ.get("SAM3_SCORE_THRESHOLD", "0.5") or "0.5")
+except Exception:
+    SAM3_SCORE_THRESHOLD = 0.5
+SAM3_BPE_PATH = os.environ.get(
+    "SAM3_BPE_PATH",
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sam3", "assets", "bpe_simple_vocab_16e6.txt.gz")),
+)
 
 SAM2_CONFIG_NAME_BY_MODEL = {
     "sam2_hiera_tiny": "sam2_hiera_t.yaml",
@@ -35,6 +55,7 @@ SAM2_CHECKPOINT_URL_BY_MODEL = {
 }
 
 _sam2_state = {"model": None, "predictor": None, "amg": None, "amg_key": None, "device": None, "image_key": None}
+_sam3_state = {"model": None, "processor": None, "device": None, "image_key": None, "image_state": None}
 _warn_counts: Dict[str, int] = {}
 
 
@@ -355,6 +376,174 @@ def _get_sam2_amg(
         _sam2_state["amg_key"] = key
 
     return amg, device
+
+
+def _ensure_sam3_checkpoint() -> str:
+    override = str(os.environ.get("SAM3_CHECKPOINT_PATH", "") or "").strip()
+    if override and os.path.exists(override):
+        return override
+
+    os.makedirs(WEIGHTS_DIR, exist_ok=True)
+    desired = os.path.join(WEIGHTS_DIR, SAM3_CHECKPOINT_NAME)
+    if os.path.exists(desired) and os.path.getsize(desired) > 50_000_000:
+        return desired
+
+    try:
+        from huggingface_hub import HfFolder, hf_hub_download  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("huggingface_hub is not installed. Install requirements.sam3.txt to enable SAM3.") from exc
+
+    # Hugging Face gated repos require an access token.
+    # - Prefer explicit env var token
+    # - Fall back to local HF login token (if present)
+    hf_token: Optional[str] = None
+    try:
+        hf_token = str(
+            (os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN") or os.environ.get("HF_ACCESS_TOKEN") or "").strip()
+        ) or None
+    except Exception:
+        hf_token = None
+    if not hf_token:
+        try:
+            hf_token = HfFolder.get_token()  # may be None if not logged in
+        except Exception:
+            hf_token = None
+
+    # Best-effort: keep weights under vision_service/.weights for portability.
+    try:
+        _ = hf_hub_download(
+            repo_id=SAM3_MODEL_ID,
+            filename="config.json",
+            local_dir=WEIGHTS_DIR,
+            local_dir_use_symlinks=False,
+            token=hf_token,
+        )
+    except TypeError:
+        try:
+            _ = hf_hub_download(repo_id=SAM3_MODEL_ID, filename="config.json", local_dir=WEIGHTS_DIR, token=hf_token)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    try:
+        path = hf_hub_download(
+            repo_id=SAM3_MODEL_ID,
+            filename=SAM3_CHECKPOINT_NAME,
+            local_dir=WEIGHTS_DIR,
+            local_dir_use_symlinks=False,
+            token=hf_token,
+        )
+        return path
+    except TypeError:
+        return hf_hub_download(repo_id=SAM3_MODEL_ID, filename=SAM3_CHECKPOINT_NAME, local_dir=WEIGHTS_DIR, token=hf_token)
+
+
+def _get_sam3_processor(img_bgr: Optional[np.ndarray] = None):
+    if not SAM3_ENABLED:
+        raise RuntimeError("SAM3 is disabled (SAM3_ENABLED=0).")
+
+    try:
+        import torch  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("torch is not installed. Install torch/torchvision to enable SAM3.") from exc
+
+    try:
+        from sam3.model_builder import build_sam3_image_model  # type: ignore
+        from sam3.model.sam3_image_processor import Sam3Processor  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("SAM3 package is not available. Ensure ./sam3 exists and install requirements.sam3.txt.") from exc
+
+    device = "cuda" if (torch.cuda.is_available() and not SAM3_FORCE_CPU) else "cpu"
+
+    processor = _sam3_state.get("processor")
+    if processor is None or _sam3_state.get("device") != device:
+        ckpt_path = _ensure_sam3_checkpoint()
+        bpe_path = SAM3_BPE_PATH if (SAM3_BPE_PATH and os.path.exists(SAM3_BPE_PATH)) else None
+        model = build_sam3_image_model(
+            bpe_path=bpe_path,
+            checkpoint_path=ckpt_path,
+            load_from_HF=False,
+            device=device,
+        )
+        processor = Sam3Processor(model, device=device, confidence_threshold=float(SAM3_SCORE_THRESHOLD))
+        _sam3_state["model"] = model
+        _sam3_state["processor"] = processor
+        _sam3_state["device"] = device
+        _sam3_state["image_key"] = None
+        _sam3_state["image_state"] = None
+
+    if img_bgr is not None:
+        try:
+            from PIL import Image  # type: ignore
+        except Exception as exc:
+            raise RuntimeError("Pillow is not installed. Install pillow to enable SAM3.") from exc
+
+        # Cache image embeddings across calls for the same image.
+        key = hashlib.sha256(img_bgr.tobytes()).hexdigest()
+        if _sam3_state.get("image_key") != key:
+            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+            pil = Image.fromarray(img_rgb)
+            state = processor.set_image(pil)
+            _sam3_state["image_key"] = key
+            _sam3_state["image_state"] = state
+
+    return processor, _sam3_state.get("image_state"), device
+
+
+def sam3_detect_boxes(img_bgr: np.ndarray, prompts: List[str], score_thr: float = 0.5, max_per_prompt: int = 50) -> List[Dict[str, Any]]:
+    """
+    Run SAM3 text-prompt detection on the full image and return a list of detections:
+    {prompt, score, bbox:[x1,y1,x2,y2]} in full-image pixel coords.
+    """
+    try:
+        processor, state, _device = _get_sam3_processor(img_bgr)
+    except Exception:
+        return []
+    if state is None:
+        return []
+
+    out: List[Dict[str, Any]] = []
+    st = state
+
+    for prompt in prompts or []:
+        p = str(prompt or "").strip()
+        if not p:
+            continue
+        try:
+            processor.reset_all_prompts(st)
+            st2 = processor.set_text_prompt(prompt=p, state=st)
+            boxes = st2.get("boxes", None)
+            scores = st2.get("scores", None)
+            if boxes is None or scores is None:
+                continue
+
+            # Boxes are expected as [x1,y1,x2,y2] in original-image coords.
+            num = len(scores) if hasattr(scores, "__len__") else 0
+            taken = 0
+            for i in range(int(num)):
+                try:
+                    s = scores[i]
+                    score = float(s.item()) if hasattr(s, "item") else float(s)
+                except Exception:
+                    continue
+                if score < float(score_thr):
+                    continue
+
+                try:
+                    b = boxes[i]
+                    bb = b.detach().cpu().numpy().tolist() if hasattr(b, "detach") else list(b)
+                    x1, y1, x2, y2 = [int(round(float(v))) for v in bb[:4]]
+                except Exception:
+                    continue
+                out.append({"prompt": p, "score": score, "bbox": [x1, y1, x2, y2]})
+                taken += 1
+                if taken >= int(max_per_prompt):
+                    break
+        except Exception:
+            continue
+
+    return out
 
 
 def _encode_mask_png(mask01: np.ndarray) -> Optional[str]:
@@ -1150,6 +1339,114 @@ def detect_node_candidates(img_bgr: np.ndarray, blue_connectors: np.ndarray, tex
     kept_scored = [(kept[i], scores[keep[i]]) for i in range(len(kept))]
     kept_scored.sort(key=lambda t: (t[1], t[0][2] * t[0][3]), reverse=True)
     return [b for (b, _s) in kept_scored[:80]]
+
+
+def detect_node_candidates_sam3(
+    img_bgr: np.ndarray,
+    blue_connectors: np.ndarray,
+    text_ink: np.ndarray,
+    text_items: Optional[List[Dict[str, Any]]] = None,
+    quality_mode: str = "max",
+) -> List[Tuple[int, int, int, int]]:
+    """
+    Node bbox proposals via SAM3 text-prompt grounding.
+
+    This tends to generate fewer noisy fragments than pure AMG on paper screenshots, and is used
+    as an extra high-quality candidate source (fallbacks to SAM2/CV if unavailable).
+    """
+    qm = str(quality_mode or "max").strip().lower()
+    if qm != "max":
+        return []
+
+    h, w = img_bgr.shape[:2]
+    img_area = float(max(1, w * h))
+
+    # Prefer prompts that correspond to common diagram containers.
+    prompts = [
+        "rounded rectangle",
+        "rectangle",
+        "cloud",
+        "trapezoid",
+        "parallelogram",
+        "diamond",
+        "ellipse",
+        "hexagon",
+        "cylinder",
+    ]
+
+    dets = sam3_detect_boxes(img_bgr, prompts, score_thr=max(0.42, float(SAM3_SCORE_THRESHOLD) - 0.05), max_per_prompt=60)
+    if not dets:
+        return []
+
+    def count_text_in_box(box: Tuple[int, int, int, int]) -> int:
+        if not text_items:
+            return 0
+        x, y, ww, hh = box
+        x2 = x + ww
+        y2 = y + hh
+        cnt = 0
+        for t in text_items:
+            bb = t.get("bbox")
+            if not bb:
+                continue
+            tx, ty, tw, th = bb
+            cx = tx + tw * 0.5
+            cy = ty + th * 0.5
+            if (x + 1) <= cx <= (x2 - 1) and (y + 1) <= cy <= (y2 - 1):
+                cnt += 1
+        return cnt
+
+    boxes: List[Tuple[int, int, int, int]] = []
+    scores: List[float] = []
+
+    for det in dets:
+        bb = det.get("bbox") or []
+        if not isinstance(bb, (list, tuple)) or len(bb) < 4:
+            continue
+        x1, y1, x2, y2 = int(bb[0]), int(bb[1]), int(bb[2]), int(bb[3])
+        ww = int(max(0, x2 - x1))
+        hh = int(max(0, y2 - y1))
+        x1, y1, ww, hh = clip_box(x1, y1, ww, hh, w, h)
+        if ww < 18 or hh < 18:
+            continue
+        area = float(ww * hh)
+        if area < 650:
+            continue
+        frac = area / img_area
+        if frac > 0.80:
+            continue
+        ar = float(ww) / float(max(1, hh))
+        if ar > 30.0 or ar < (1.0 / 30.0):
+            continue
+
+        # Prefer boxes that contain text or have connectors touching their border.
+        text_count = count_text_in_box((x1, y1, ww, hh))
+        blue_border = 0.0
+        if blue_connectors is not None and getattr(blue_connectors, "size", 0) > 0 and blue_connectors.shape[:2] == (h, w):
+            roi = blue_connectors[y1 : y1 + hh, x1 : x1 + ww]
+            if roi.size > 0:
+                thick = int(max(1, min(3, int(round(min(ww, hh) * 0.02)))))
+                top = roi[:thick, :]
+                bot = roi[max(0, hh - thick) :, :]
+                left = roi[:, :thick]
+                right = roi[:, max(0, ww - thick) :]
+                blue_border = float(np.count_nonzero(top) + np.count_nonzero(bot) + np.count_nonzero(left) + np.count_nonzero(right)) / float(
+                    max(1, ww * thick * 2 + hh * thick * 2)
+                )
+
+        base = float(det.get("score", 0.0) or 0.0)
+        score = base + (0.12 if text_count > 0 else 0.0) + (0.08 if blue_border > 0.002 else 0.0)
+        boxes.append((x1, y1, ww, hh))
+        scores.append(score)
+
+    if not boxes:
+        return []
+
+    keep = nms_boxes(boxes, scores, iou_thr=0.24)
+    kept = [boxes[i] for i in keep]
+    kept_scored = [(kept[i], scores[keep[i]]) for i in range(len(kept))]
+    kept_scored.sort(key=lambda t: (t[1], t[0][2] * t[0][3]), reverse=True)
+    return [b for (b, _s) in kept_scored[:90]]
 
 
 def detect_node_candidates_sam2_amg(
@@ -2641,8 +2938,22 @@ def build_structure(img_bgr: np.ndarray, text_items_override: Optional[List[Dict
     text_poly = text_mask_from_polys((h, w), text_items)
     text_ink = text_ink_mask(img_bgr, text_items)
 
-    # Prefer SAM2-AMG for node candidates (paper figures); fall back to CV edges if needed.
-    node_boxes = detect_node_candidates_sam2_amg(img_bgr, blue, text_ink, text_items=text_items, quality_mode=quality_mode)
+    # Route-1 node candidates:
+    # - SAM3 (semantic grounding) tends to be less noisy on paper screenshots
+    # - SAM2-AMG adds coverage when SAM3 misses nodes
+    # - CV edges is the last resort fallback
+    node_boxes_sam3 = detect_node_candidates_sam3(img_bgr, blue, text_ink, text_items=text_items, quality_mode=quality_mode)
+    node_boxes_sam2 = detect_node_candidates_sam2_amg(img_bgr, blue, text_ink, text_items=text_items, quality_mode=quality_mode)
+
+    node_boxes: List[Tuple[int, int, int, int]] = []
+    for b in (node_boxes_sam3 or []) + (node_boxes_sam2 or []):
+        if not node_boxes:
+            node_boxes.append(b)
+            continue
+        if any(box_iou(b, prev) >= 0.72 for prev in node_boxes):
+            continue
+        node_boxes.append(b)
+
     if not node_boxes:
         node_boxes = detect_node_candidates(img_bgr, blue, text_ink)
 
@@ -2684,6 +2995,100 @@ def build_structure(img_bgr: np.ndarray, text_items_override: Optional[List[Dict
         # Keep a sane cap after pruning.
         node_boxes = node_boxes[:60]
 
+    # Optional SAM3 overlay proposals (run once per image, then assigned to nodes by containment/IoU).
+    sam3_overlays_by_node: Dict[int, List[Dict[str, Any]]] = {}
+    try:
+        if str(quality_mode or "max").strip().lower() == "max" and node_boxes:
+            overlay_prompts = ["icon", "picture", "chart", "plot"]
+            dets = sam3_detect_boxes(
+                img_bgr,
+                overlay_prompts,
+                score_thr=max(0.45, float(SAM3_SCORE_THRESHOLD) - 0.05),
+                max_per_prompt=80,
+            )
+            if dets:
+                dets.sort(key=lambda d: float(d.get("score", 0.0) or 0.0), reverse=True)
+                for i in range(len(node_boxes)):
+                    sam3_overlays_by_node[i] = []
+
+                for det in dets[:420]:
+                    bb = det.get("bbox") or []
+                    if not isinstance(bb, (list, tuple)) or len(bb) < 4:
+                        continue
+                    x1, y1, x2, y2 = int(bb[0]), int(bb[1]), int(bb[2]), int(bb[3])
+                    ww = int(max(0, x2 - x1))
+                    hh = int(max(0, y2 - y1))
+                    x1, y1, ww, hh = clip_box(x1, y1, ww, hh, w, h)
+                    if ww < 8 or hh < 8:
+                        continue
+                    area = float(ww * hh)
+                    frac = area / float(max(1.0, img_area))
+                    if frac > 0.40:
+                        continue
+
+                    prompt_name = str(det.get("prompt", "") or "").strip().lower()
+                    if prompt_name not in ("icon", "picture", "chart", "plot"):
+                        continue
+
+                    # Reject obvious connector/line artifacts for icon prompt.
+                    ar = float(ww) / float(max(1, hh))
+                    if prompt_name == "icon" and (ar > 7.0 or ar < (1.0 / 7.0)):
+                        continue
+
+                    if prompt_name == "icon" and text_ink is not None and text_ink.size > 0 and text_ink.shape[:2] == (h, w):
+                        roi_txt = text_ink[y1 : y1 + hh, x1 : x1 + ww]
+                        txt_ratio = float(np.count_nonzero(roi_txt)) / float(max(1.0, area))
+                        if txt_ratio > 0.08:
+                            continue
+
+                    if prompt_name == "icon" and blue is not None and getattr(blue, "size", 0) > 0 and blue.shape[:2] == (h, w):
+                        roi_blue = blue[y1 : y1 + hh, x1 : x1 + ww]
+                        blue_ratio = float(np.count_nonzero(roi_blue)) / float(max(1.0, area))
+                        if blue_ratio > 0.12:
+                            continue
+
+                    kind = "icon"
+                    if prompt_name == "picture":
+                        kind = "photo"
+                    elif prompt_name == "chart":
+                        kind = "chart"
+                    elif prompt_name == "plot":
+                        kind = "plot"
+
+                    # Assign to a node: require center inside node bbox.
+                    cx = float(x1) + float(ww) * 0.5
+                    cy = float(y1) + float(hh) * 0.5
+                    best_idx = -1
+                    best_iou = 0.0
+                    for ni, nb in enumerate(node_boxes):
+                        nx, ny, nw, nh = nb
+                        if not (nx <= cx <= (nx + nw) and ny <= cy <= (ny + nh)):
+                            continue
+                        iou = box_iou((x1, y1, ww, hh), nb)
+                        if iou > best_iou:
+                            best_iou = iou
+                            best_idx = ni
+                    if best_idx < 0:
+                        continue
+
+                    existing = sam3_overlays_by_node.get(best_idx) or []
+                    if any(box_iou((x1, y1, ww, hh), (int(o["bbox"]["x"]), int(o["bbox"]["y"]), int(o["bbox"]["w"]), int(o["bbox"]["h"]))) >= 0.78 for o in existing if isinstance(o, dict) and isinstance(o.get("bbox"), dict)):
+                        continue
+
+                    score = float(det.get("score", 0.0) or 0.0)
+                    conf = float(max(0.0, min(1.0, 0.35 + 0.65 * score)))
+                    existing.append(
+                        {
+                            "kind": kind,
+                            "bbox": {"x": int(x1), "y": int(y1), "w": int(ww), "h": int(hh)},
+                            "confidence": conf,
+                        }
+                    )
+                    # cap per node to avoid clutter
+                    sam3_overlays_by_node[best_idx] = existing[:18]
+    except Exception:
+        sam3_overlays_by_node = {}
+
     # refine nodes via contours within bbox for shape classification and colors
     nodes: List[Dict[str, Any]] = []
     node_contours: List[np.ndarray] = []
@@ -2723,7 +3128,33 @@ def build_structure(img_bgr: np.ndarray, text_items_override: Optional[List[Dict
         label_text, label_bbox = combine_text(assigned)
         fill_bgr = hex_to_bgr(colors.get("fillColor", "#ffffff"))
         inner_shapes, node_overlays_cv = detect_internal_elements(img_bgr, bbox, blue, text_ink, fill_bgr)
-        node_overlays = detect_internal_overlays_sam2_amg(img_bgr, bbox, blue, text_poly, fill_bgr, quality_mode=quality_mode) or node_overlays_cv
+        node_overlays_base = detect_internal_overlays_sam2_amg(img_bgr, bbox, blue, text_poly, fill_bgr, quality_mode=quality_mode) or node_overlays_cv
+        node_overlays = list(node_overlays_base or [])
+
+        # Merge SAM3 overlay proposals for this node (if any), preferring existing (AMG/CV) candidates.
+        sam3_extra = sam3_overlays_by_node.get(idx) if isinstance(sam3_overlays_by_node, dict) else None
+        if sam3_extra:
+            for cand in sam3_extra:
+                if not isinstance(cand, dict) or not isinstance(cand.get("bbox"), dict):
+                    continue
+                bb2 = cand["bbox"]
+                try:
+                    b2 = (int(bb2.get("x", 0)), int(bb2.get("y", 0)), int(bb2.get("w", 0)), int(bb2.get("h", 0)))
+                except Exception:
+                    continue
+                if b2[2] < 6 or b2[3] < 6:
+                    continue
+                if any(
+                    (isinstance(o, dict) and isinstance(o.get("bbox"), dict) and box_iou(
+                        b2,
+                        (int(o["bbox"].get("x", 0)), int(o["bbox"].get("y", 0)), int(o["bbox"].get("w", 0)), int(o["bbox"].get("h", 0))),
+                    ) >= 0.78)
+                    for o in node_overlays
+                ):
+                    continue
+                node_overlays.append(cand)
+
+        node_overlays = node_overlays[:24]
 
         # Heuristic: texture blocks/noise/photos should be rendered as overlay (opaqueRect),
         # not as editable shapes. This catches "data/noise" squares commonly seen in papers.
@@ -2769,9 +3200,22 @@ def build_structure(img_bgr: np.ndarray, text_items_override: Optional[List[Dict
 def health() -> Dict[str, Any]:
     torch_ok = importlib.util.find_spec("torch") is not None
     sam2_ok = importlib.util.find_spec("sam2") is not None
+    sam3_pkg_ok = importlib.util.find_spec("sam3") is not None
+    sam3_deps_ok = (
+        importlib.util.find_spec("huggingface_hub") is not None
+        and importlib.util.find_spec("iopath") is not None
+        and importlib.util.find_spec("safetensors") is not None
+        and importlib.util.find_spec("timm") is not None
+        and importlib.util.find_spec("einops") is not None
+        and importlib.util.find_spec("ftfy") is not None
+        and importlib.util.find_spec("regex") is not None
+        and importlib.util.find_spec("PIL") is not None
+    )
     config_ok = False
     cfg_path = ""
     ckpt_ok = False
+    sam3_ckpt_ok = False
+    sam3_bpe_ok = bool(SAM3_BPE_PATH and os.path.exists(SAM3_BPE_PATH))
     try:
         if torch_ok and sam2_ok:
             cfg_path = _resolve_sam2_config_path(SAM2_MODEL_NAME)
@@ -2782,6 +3226,14 @@ def health() -> Dict[str, Any]:
     except Exception:
         config_ok = False
         ckpt_ok = False
+
+    try:
+        sam3_ckpt_path = os.path.join(WEIGHTS_DIR, SAM3_CHECKPOINT_NAME)
+        sam3_ckpt_ok = os.path.exists(sam3_ckpt_path) and os.path.getsize(sam3_ckpt_path) > 50_000_000
+    except Exception:
+        sam3_ckpt_ok = False
+
+    sam3_ok = bool(torch_ok and sam3_pkg_ok and sam3_deps_ok and sam3_ckpt_ok and sam3_bpe_ok and SAM3_ENABLED)
     return {
         "ok": "true",
         "sam2": "true" if (torch_ok and sam2_ok and config_ok and ckpt_ok) else "false",
@@ -2789,6 +3241,12 @@ def health() -> Dict[str, Any]:
         "sam2Config": cfg_path,
         "sam2ConfigOk": config_ok,
         "sam2CheckpointOk": ckpt_ok,
+        "sam3": "true" if sam3_ok else "false",
+        "sam3Enabled": bool(SAM3_ENABLED),
+        "sam3ModelId": SAM3_MODEL_ID,
+        "sam3CheckpointName": SAM3_CHECKPOINT_NAME,
+        "sam3CheckpointOk": sam3_ckpt_ok,
+        "sam3BpeOk": sam3_bpe_ok,
         "capabilities": {"overlaysResolve": True, "augment": True, "analyze": True},
     }
 

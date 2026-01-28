@@ -40,6 +40,52 @@ You can control it via env vars:
 - `SAM2_MODEL` (default: `sam2_hiera_base_plus`)
 - `SAM2_FORCE_CPU=1` (force CPU; slower)
 
+## SAM3 (text-prompt grounding for cleaner proposals)
+
+This repo vendors the `sam3/` Python package (borrowed from Edit-Banana) to produce cleaner node/overlay proposal boxes on paper-figure screenshots.
+It is optional and only used when installed and enabled.
+
+Install deps:
+
+```powershell
+cd vision_service
+.\.venv\Scripts\Activate.ps1
+
+# Torch CUDA (pick the CUDA index that matches your setup; cu121 is common on Windows)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+pip install -r requirements.sam3.txt
+```
+
+### Download checkpoint
+
+The official Hugging Face repo (`facebook/sam3`) may be gated (401/403) depending on your account.
+Recommended: download from ModelScope (public) via Git LFS:
+
+```powershell
+cd vision_service
+.\.venv\Scripts\Activate.ps1
+python download_sam3.py
+```
+
+This downloads and caches the checkpoint into `vision_service/.weights/` (default: `sam3.pt`).
+You can also use `model.safetensors`:
+
+```powershell
+python download_sam3.py model.safetensors
+```
+
+NOTE: If you prefer Hugging Face, request access and provide a token via `HF_TOKEN` / `HUGGINGFACE_HUB_TOKEN`
+(or login locally with `hf auth login`), or download the checkpoint manually and set `SAM3_CHECKPOINT_PATH`.
+
+You can control it via env vars:
+- `SAM3_ENABLED=0` (disable SAM3)
+- `SAM3_FORCE_CPU=1` (force CPU)
+- `SAM3_MODEL_ID` (default: `facebook/sam3`)
+- `SAM3_CHECKPOINT_NAME` (default: `sam3.pt`)
+- `SAM3_CHECKPOINT_PATH` (use a local checkpoint instead of auto-download)
+- `SAM3_BPE_PATH` (override tokenizer vocab path; default points to `sam3/assets/bpe_simple_vocab_16e6.txt.gz`)
+
 ## Run
 
 ```powershell

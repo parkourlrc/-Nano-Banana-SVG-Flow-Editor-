@@ -90,15 +90,15 @@ const providerBaseUrls = {
 };
 
 const providerCatalog = [
-  { type: 'openai-compatible', label: 'OpenAI-compatible', requiresBase: true, requiresApiKey: true, defaultModel: '', defaultBase: providerBaseUrls['openai-compatible'] },
-  { type: 'openai', label: 'OpenAI', requiresBase: false, requiresApiKey: true, defaultModel: 'gpt-4o-mini', defaultBase: providerBaseUrls.openai },
-  { type: 'gemini', label: 'Gemini', requiresBase: false, requiresApiKey: true, defaultModel: 'gemini-2.5-flash', defaultBase: '' },
-  { type: 'anthropic', label: 'Anthropic', requiresBase: false, requiresApiKey: true, defaultModel: 'claude-3-5-sonnet-20241022', defaultBase: '' },
-  { type: 'openrouter', label: 'OpenRouter', requiresBase: true, requiresApiKey: true, defaultModel: 'openai/gpt-4o-mini', defaultBase: providerBaseUrls.openrouter },
-  { type: 'groq', label: 'Groq', requiresBase: true, requiresApiKey: true, defaultModel: 'llama-3.1-70b-versatile', defaultBase: providerBaseUrls.groq },
-  { type: 'deepseek', label: 'DeepSeek', requiresBase: true, requiresApiKey: true, defaultModel: 'deepseek-chat', defaultBase: providerBaseUrls.deepseek },
-  { type: 'ollama', label: 'Ollama (Local)', requiresBase: true, requiresApiKey: false, defaultModel: 'llama3.1', defaultBase: 'http://localhost:11434/v1' },
-  { type: 'custom', label: 'Custom', requiresBase: true, requiresApiKey: true, defaultModel: '', defaultBase: '' }
+  { type: 'openai-compatible', label: 'OpenAI-compatible', requiresBase: true, requiresApiKey: true, defaultModel: '', defaultPlannerModel: 'gemini-3-pro', defaultBase: providerBaseUrls['openai-compatible'] },
+  { type: 'openai', label: 'OpenAI', requiresBase: false, requiresApiKey: true, defaultModel: 'gpt-4o-mini', defaultPlannerModel: 'gpt-4o-mini', defaultBase: providerBaseUrls.openai },
+  { type: 'gemini', label: 'Gemini', requiresBase: false, requiresApiKey: true, defaultModel: 'gemini-2.5-flash', defaultPlannerModel: 'gemini-3-pro', defaultBase: '' },
+  { type: 'anthropic', label: 'Anthropic', requiresBase: false, requiresApiKey: true, defaultModel: 'claude-3-5-sonnet-20241022', defaultPlannerModel: 'claude-3-5-sonnet-20241022', defaultBase: '' },
+  { type: 'openrouter', label: 'OpenRouter', requiresBase: true, requiresApiKey: true, defaultModel: 'openai/gpt-4o-mini', defaultPlannerModel: 'openai/gpt-4o-mini', defaultBase: providerBaseUrls.openrouter },
+  { type: 'groq', label: 'Groq', requiresBase: true, requiresApiKey: true, defaultModel: 'llama-3.1-70b-versatile', defaultPlannerModel: 'llama-3.1-70b-versatile', defaultBase: providerBaseUrls.groq },
+  { type: 'deepseek', label: 'DeepSeek', requiresBase: true, requiresApiKey: true, defaultModel: 'deepseek-chat', defaultPlannerModel: 'deepseek-chat', defaultBase: providerBaseUrls.deepseek },
+  { type: 'ollama', label: 'Ollama (Local)', requiresBase: true, requiresApiKey: false, defaultModel: 'llama3.1', defaultPlannerModel: 'llama3.1', defaultBase: 'http://localhost:11434/v1' },
+  { type: 'custom', label: 'Custom', requiresBase: true, requiresApiKey: true, defaultModel: '', defaultPlannerModel: '', defaultBase: '' }
 ];
 
 const providerCatalogByType = providerCatalog.reduce((acc, item) => {
@@ -972,11 +972,13 @@ function normalizeProviders(raw) {
     const baseUrl = String(merged.baseUrl || '').trim();
     const apiKey = String(merged.apiKey || '');
     const imageModel = String(merged.imageModel || '').trim();
+    const plannerModel = String(merged.plannerModel || merged.vlmModel || '').trim();
 
     providers[entry.type] = {
       ...merged,
       type: entry.type,
       model: model || entry.defaultModel || '',
+      plannerModel: plannerModel || entry.defaultPlannerModel || '',
       imageModel,
       baseUrl: baseUrl || entry.defaultBase || '',
       apiKey
@@ -1036,6 +1038,14 @@ function normalizeProvider(provider) {
   if (!provider) return null;
   const baseUrl = provider.baseUrl || providerBaseUrls[provider.type] || '';
   return { ...provider, baseUrl };
+}
+
+function normalizeProviderForVision(provider) {
+  const normalized = normalizeProvider(provider);
+  if (!normalized) return null;
+  const plannerModel = String(provider?.plannerModel || '').trim();
+  if (!plannerModel) return normalized;
+  return { ...normalized, model: plannerModel };
 }
 
 function isProviderConfigured(provider) {
@@ -2506,7 +2516,8 @@ async function callOpenAICompatibleImageModel(provider, prompt, images) {
 }
 
 async function callProvider(provider, prompt, images, format) {
-  const normalized = normalizeProvider(provider);
+  const wantsVision = extractImageParts(images).length > 0;
+  const normalized = wantsVision ? normalizeProviderForVision(provider) : normalizeProvider(provider);
   if (!normalized) {
     throw new Error('Provider not configured');
   }
@@ -2528,7 +2539,7 @@ async function callProvider(provider, prompt, images, format) {
 }
 
 async function callOverlays(provider, images, imageWidth, imageHeight) {
-  const normalized = normalizeProvider(provider);
+  const normalized = normalizeProviderForVision(provider);
   if (!normalized) {
     throw new Error('Provider not configured');
   }
@@ -2716,7 +2727,7 @@ function buildOverlayRefinePrompt(params) {
 }
 
 async function callStructure(provider, prompt, images, imageWidth, imageHeight, attemptPromptOverride, options = {}) {
-  const normalized = normalizeProvider(provider);
+  const normalized = normalizeProviderForVision(provider);
   if (!normalized) throw new Error('Provider not configured');
 
   const instruction = buildStructureInstruction(imageWidth, imageHeight, SHAPE_CONFIDENCE_THRESHOLD);
@@ -2859,7 +2870,7 @@ async function callStructure(provider, prompt, images, imageWidth, imageHeight, 
 }
 
 async function callVisionJsonWithImages(provider, systemContent, userText, images, options = {}) {
-  const normalized = normalizeProvider(provider);
+  const normalized = normalizeProviderForVision(provider);
   if (!normalized) throw new Error('Provider not configured');
 
   const imgParts = extractImageParts(images);
@@ -3487,7 +3498,7 @@ async function resolveOverlaysWithRetries(provider, visionUrl, firstImage, image
 }
 
 async function callCandidateLabel(provider, prompt, images, imageWidth, imageHeight, candidates) {
-  const normalized = normalizeProvider(provider);
+  const normalized = normalizeProviderForVision(provider);
   if (!normalized) throw new Error('Provider not configured');
 
   const instruction = buildCandidateLabelInstruction(imageWidth, imageHeight, candidates);
@@ -3832,6 +3843,7 @@ app.post('/api/providers', (req, res) => {
       ...existing,
       type,
       model: String(payload.model || '').trim() || existing.model || meta.defaultModel || '',
+      plannerModel: String(payload.plannerModel || '').trim() || existing.plannerModel || meta.defaultPlannerModel || '',
       imageModel: String(payload.imageModel || '').trim() || existing.imageModel || '',
       baseUrl: String(payload.baseUrl || '').trim() || existing.baseUrl || meta.defaultBase || '',
       apiKey: String(payload.apiKey || '').trim() ? String(payload.apiKey).trim() : existing.apiKey || ''

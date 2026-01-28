@@ -53,3 +53,7 @@ vision_service/.mypy_cache/
 vision_service/.ruff_cache/
 vision_service/.weights/
 vision_service/.cache/
+
+# Python bytecode (global)
+__pycache__/
+*.py[cod]

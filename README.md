@@ -32,6 +32,7 @@
 - Node.js：建议 **18+**（需要内置 `fetch`）
 - 浏览器：Chrome / Edge
 - （可选）本地视觉服务：`vision_service/`（CV + OCR + SAM2，详见 `vision_service/README.md`）
+- （可选）SAM3（已内置代码 + 需额外依赖）：用于更干净的节点/覆盖层候选框（见 `vision_service/README.md`）
 
 ## 快速开始
 
@@ -61,7 +62,8 @@ $env:PORT=3001; npm run dev
 3. 填写必要字段：
    - `API Key`
    - `Base URL`（OpenAI-compatible 默认：`https://0-0.pro/v1`）
-   - `LLM Model`（用于结构抽取/文本抽取/规划/critic 等）
+   - `LLM Model`（用于**无参考图**的文生图/结构生成：`/api/flow/:format` 的主要模型）
+   - `VLM Planner Model`（用于**带图片**的视觉任务：OCR 文本抽取 / 结构抽取 / overlay 规划 / critic 终审；默认 `gemini-3-pro`）
    - `Image Model`（可选，用于生图/改写参考图）
 4. 点击 `Save Provider`
 5. （可选）点击 `获取API / Get API` 会打开：https://0-0.pro/
@@ -128,6 +130,7 @@ npm run check:secrets
 - `web/`：前端（`index.html` / `app.js` / `styles.css`）
 - `server/`：后端（`server/index.js`）
 - `vision_service/`：可选本地视觉服务（FastAPI + CV + SAM2）
+- `sam3/`：可选 SAM3 包（用于更高质量的候选框；权重下载到 `vision_service/.weights/`）
 
 ---
 
